@@ -1,6 +1,7 @@
 const express = require('express');
 const YTMusic = require('ytmusic-api');
-const ytdl = require('@distube/ytdl-core'); // Changed to distube version
+const ytdl = require('@distube/ytdl-core');
+const fs = require('fs');
 const cors = require('cors');
 
 const app = express();
@@ -8,6 +9,18 @@ const ytmusic = new YTMusic();
 
 app.use(cors());
 app.use(express.json());
+
+// --- SECURE COOKIE AGENT SETUP ---
+let agent;
+try {
+    // This reads the JSON array you just provided
+    const cookieData = JSON.parse(fs.readFileSync('cookies.json', 'utf8'));
+    agent = ytdl.createAgent(cookieData);
+    console.log("✅ YouTube Agent successfully created with cookies.");
+} catch (err) {
+    console.error("❌ Failed to load cookies.json:", err.message);
+    console.warn("Continuing without cookies (Bot detection likely).");
+}
 
 const initYT = async () => {
     try {
@@ -37,25 +50,15 @@ app.get('/search', async (req, res) => {
 app.get('/stream/:id', async (req, res) => {
     try {
         const videoId = req.params.id;
-        if (!videoId) return res.status(400).json({ error: "Video ID required" });
-
         const url = `https://www.youtube.com/watch?v=${videoId}`;
         
-        // Added Basic Options to bypass some YouTube restrictions
-        const info = await ytdl.getInfo(url, {
-            requestOptions: {
-                headers: {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                }
-            }
-        });
+        // Passing the 'agent' with your cookies into the getInfo call
+        const info = await ytdl.getInfo(url, { agent });
 
         const format = ytdl.chooseFormat(info.formats, { 
             quality: 'highestaudio', 
             filter: 'audioonly' 
         });
-
-        if (!format) throw new Error("No audio format found");
 
         res.json({
             url: format.url,
@@ -63,10 +66,10 @@ app.get('/stream/:id', async (req, res) => {
             duration: info.videoDetails.lengthSeconds
         });
     } catch (err) {
-        console.error("CRITICAL STREAM ERROR:", err.message); // This will show in Render Logs
+        console.error("CRITICAL STREAM ERROR:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
