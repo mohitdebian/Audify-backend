@@ -1,6 +1,6 @@
 const express = require('express');
 const YTMusic = require('ytmusic-api');
-const ytdl = require('ytdl-core');
+const ytdl = require('@distube/ytdl-core'); // Changed to distube version
 const cors = require('cors');
 
 const app = express();
@@ -9,7 +9,6 @@ const ytmusic = new YTMusic();
 app.use(cors());
 app.use(express.json());
 
-// Initialize YTMusic once when server starts
 const initYT = async () => {
     try {
         await ytmusic.initialize();
@@ -20,17 +19,14 @@ const initYT = async () => {
 };
 initYT();
 
-// Root route to verify server is live
 app.get('/', (req, res) => {
-    res.send('Audyn Music Engine is Live. Use /search?q=song or /stream/videoId');
+    res.send('Audyn Music Engine is Live.');
 });
 
-// 1. Search Endpoint (Stays as query param: /search?q=name)
 app.get('/search', async (req, res) => {
     try {
         const query = req.query.q;
         if (!query) return res.status(400).json({ error: "Query required" });
-        
         const results = await ytmusic.searchSongs(query);
         res.json(results);
     } catch (err) {
@@ -38,31 +34,37 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// 2. Stream Link Endpoint (Updated to use Path Parameter: /stream/:id)
 app.get('/stream/:id', async (req, res) => {
     try {
-        const videoId = req.params.id; // Changed from req.query.id
-        
+        const videoId = req.params.id;
         if (!videoId) return res.status(400).json({ error: "Video ID required" });
 
         const url = `https://www.youtube.com/watch?v=${videoId}`;
         
-        // Get info to find the best audio format
-        const info = await ytdl.getInfo(url);
+        // Added Basic Options to bypass some YouTube restrictions
+        const info = await ytdl.getInfo(url, {
+            requestOptions: {
+                headers: {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                }
+            }
+        });
+
         const format = ytdl.chooseFormat(info.formats, { 
             quality: 'highestaudio', 
             filter: 'audioonly' 
         });
 
-        // Return the direct URL and metadata
+        if (!format) throw new Error("No audio format found");
+
         res.json({
             url: format.url,
             title: info.videoDetails.title,
             duration: info.videoDetails.lengthSeconds
         });
     } catch (err) {
-        console.error("Stream Error:", err.message);
-        res.status(500).json({ error: "Could not get stream link. Ensure video ID is correct." });
+        console.error("CRITICAL STREAM ERROR:", err.message); // This will show in Render Logs
+        res.status(500).json({ error: err.message });
     }
 });
 
