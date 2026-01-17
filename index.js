@@ -11,12 +11,21 @@ app.use(express.json());
 
 // Initialize YTMusic once when server starts
 const initYT = async () => {
-    await ytmusic.initialize();
-    console.log("YT Music Initialized");
+    try {
+        await ytmusic.initialize();
+        console.log("YT Music Initialized");
+    } catch (err) {
+        console.error("Failed to initialize YT Music:", err);
+    }
 };
 initYT();
 
-// 1. Search Endpoint
+// Root route to verify server is live
+app.get('/', (req, res) => {
+    res.send('Audyn Music Engine is Live. Use /search?q=song or /stream/videoId');
+});
+
+// 1. Search Endpoint (Stays as query param: /search?q=name)
 app.get('/search', async (req, res) => {
     try {
         const query = req.query.q;
@@ -29,10 +38,11 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// 2. Stream Link Endpoint (This is what your Android app plays)
-app.get('/stream', async (req, res) => {
+// 2. Stream Link Endpoint (Updated to use Path Parameter: /stream/:id)
+app.get('/stream/:id', async (req, res) => {
     try {
-        const videoId = req.query.id;
+        const videoId = req.params.id; // Changed from req.query.id
+        
         if (!videoId) return res.status(400).json({ error: "Video ID required" });
 
         const url = `https://www.youtube.com/watch?v=${videoId}`;
@@ -51,7 +61,8 @@ app.get('/stream', async (req, res) => {
             duration: info.videoDetails.lengthSeconds
         });
     } catch (err) {
-        res.status(500).json({ error: "Could not get stream link" });
+        console.error("Stream Error:", err.message);
+        res.status(500).json({ error: "Could not get stream link. Ensure video ID is correct." });
     }
 });
 
