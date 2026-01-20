@@ -10,61 +10,64 @@ app = Flask(__name__)
 CORS(app)
 ytmusic = YTMusic()
 
+# ==============================================================================
+# ✅ USER AGENT CONFIGURED
+# This matches the browser you used to get the cookies.
+# ==============================================================================
+MY_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+
 # --- 1. COOKIE SETUP ---
 def setup_cookies():
-    # Priority 1: Local file
+    # Priority 1: Local file (for testing on your laptop)
     if os.path.exists('cookies.txt'):
-        print("✅ Found local 'cookies.txt'.")
         return 'cookies.txt'
     
-    # Priority 2: Render Env Var
+    # Priority 2: Render Env Var (for production)
+    # This reads the Netscape text you pasted in Render
     cookie_content = os.environ.get('YOUTUBE_COOKIES')
     if cookie_content:
-        print("✅ Found 'YOUTUBE_COOKIES' env var. Creating temp file!")
         try:
             temp = tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt')
             temp.write(cookie_content)
             temp.close()
             return temp.name
-        except Exception as e:
-            print(f"❌ Error creating temp cookie file: {e}")
+        except Exception:
             return None
-
-    print("⚠️ NO COOKIES FOUND. Server may be blocked by YouTube.")
     return None
 
 COOKIE_FILE_PATH = setup_cookies()
 
-# --- 2. CORE LOGIC ---
+# --- 2. EXTRACTION LOGIC ---
 def get_audio_url(video_id):
-    try:
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    
+    ydl_opts = {
+        'format': 'bestaudio[ext=m4a]/bestaudio',
+        'quiet': True,
+        'noplaylist': True,
         
-        # Base Options
-        ydl_opts = {
-            'format': 'bestaudio[ext=m4a]/bestaudio',
-            'quiet': True,
-            'noplaylist': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        # 1. TELL YOUTUBE WE ARE YOUR LINUX CHROME BROWSER
+        'user_agent': MY_USER_AGENT,
+
+        # 2. PROVE WE ARE LOGGED IN
+        'cookiefile': COOKIE_FILE_PATH,
+        
+        # 3. FAKE BROWSER HEADERS
+        'http_headers': {
+            'User-Agent': MY_USER_AGENT,
+            'Referer': 'https://www.youtube.com/',
+            'Accept-Language': 'en-US,en;q=0.9',
         }
+    }
 
-        # CRITICAL: Use Cookies if available
-        if COOKIE_FILE_PATH:
-            ydl_opts['cookiefile'] = COOKIE_FILE_PATH
-        else:
-            # Fallback: Try iOS Client (Often works better than Android on Render)
-            ydl_opts['extractor_args'] = {
-                'youtube': {
-                    'player_client': ['ios']
-                }
-            }
-
+    try:
+        print(f"🍪 Extracting with User-Agent: {MY_USER_AGENT[:30]}...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
             return info.get('url')
             
     except Exception as e:
-        print(f"❌ Extraction Error: {e}")
+        print(f"❌ Extraction Failed: {e}")
         return None
 
 # --- 3. PROXY STREAM ---
@@ -77,15 +80,17 @@ def stream_audio():
     google_url = get_audio_url(video_id)
     
     if not google_url:
-        return "Audio not found (Extraction Failed)", 404
+        return jsonify({"error": "YouTube blocked the request. Check Render Logs."}), 403
 
     try:
-        req = requests.get(google_url, stream=True)
+        # We must use the SAME User Agent to fetch the actual file
+        headers = {'User-Agent': MY_USER_AGENT}
+        req = requests.get(google_url, headers=headers, stream=True)
         return Response(stream_with_context(req.iter_content(chunk_size=8192)), 
                         content_type='audio/mp4')
     except Exception as e:
-        print(f"❌ Stream Error: {e}")
-        return "Stream Failed", 500
+        print(f"❌ Stream Proxy Error: {e}")
+        return "Stream Proxy Failed", 500
 
 # --- 4. SEARCH ---
 @app.route('/search', methods=['GET'])
